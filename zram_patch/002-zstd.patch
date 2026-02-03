@@ -4384,15 +4384,6 @@ index c22a2e69bf46..2e91e7780c1f 100644
   * All rights reserved.
   *
   * This source code is licensed under both the BSD-style license (found in the
-@@ -15,7 +15,7 @@
- /*-****************************************
- *  Dependencies
- ******************************************/
--#include <linux/unaligned.h>  /* get_unaligned, put_unaligned* */
-+#include <asm/unaligned.h>  /* get_unaligned, put_unaligned* */
- #include <linux/compiler.h>  /* inline */
- #include <linux/swab.h>  /* swab32, swab64 */
- #include <linux/types.h>  /* size_t, ptrdiff_t */
 @@ -24,6 +24,7 @@
  /*-****************************************
  *  Compiler specifics

@@ -7657,8 +7657,8 @@ index 000000000000..cccd7b7d0ab9
 +#define LZ4_OPT_NUM (1 << 12)
 +
 +/*===   Macros   ===*/
-+#define MIN(a, b) ((a) < (b) ? (a) : (b))
-+#define MAX(a, b) ((a) > (b) ? (a) : (b))
++#define LZ4_MIN(a, b) ((a) < (b) ? (a) : (b))
++#define LZ4_MAX(a, b) ((a) > (b) ? (a) : (b))
 +
 +/*===   Levels definition   ===*/
 +typedef enum { lz4mid, lz4hc, lz4opt } lz4hc_strat_e;
@@ -7689,7 +7689,7 @@ index 000000000000..cccd7b7d0ab9
 +     * possibly something worth revisiting for consistency */
 +	if (cLevel < 1)
 +		cLevel = LZ4HC_CLEVEL_DEFAULT;
-+	cLevel = MIN(LZ4HC_CLEVEL_MAX, cLevel);
++	cLevel = LZ4_MIN(LZ4HC_CLEVEL_MAX, cLevel);
 +	return k_clTable[cLevel];
 +}
 +
@@ -7812,7 +7812,7 @@ index 000000000000..cccd7b7d0ab9
 +		    const BYTE *const iMin, const BYTE *const mMin)
 +{
 +	int back = 0;
-+	int const min = (int)MAX(iMin - ip, mMin - match);
++	int const min = (int)LZ4_MAX(iMin - ip, mMin - match);
 +	assert(min <= 0);
 +	assert(ip >= iMin);
 +	assert((size_t)(ip - iMin) < (1U << 31));
@@ -8077,7 +8077,7 @@ index 000000000000..cccd7b7d0ab9
 +						     dictCtx->dictLimit +
 +						     l8DictMatchIndex;
 +			const size_t safeLen =
-+				MIN(lDictEndIndex - l8DictMatchIndex,
++				LZ4_MIN(lDictEndIndex - l8DictMatchIndex,
 +				    (size_t)(iHighLimit - ip));
 +			int mlt = (int)LZ4_count(ip, matchPtr, ip + safeLen);
 +			if (mlt >= MINMATCH) {
@@ -8103,7 +8103,7 @@ index 000000000000..cccd7b7d0ab9
 +						     dictCtx->dictLimit +
 +						     l4DictMatchIndex;
 +			const size_t safeLen =
-+				MIN(lDictEndIndex - l4DictMatchIndex,
++				LZ4_MIN(lDictEndIndex - l4DictMatchIndex,
 +				    (size_t)(iHighLimit - ip));
 +			int mlt = (int)LZ4_count(ip, matchPtr, ip + safeLen);
 +			if (mlt >= MINMATCH) {
@@ -8264,7 +8264,7 @@ index 000000000000..cccd7b7d0ab9
 +						const BYTE *const matchPtr =
 +							dictStart +
 +							(pos8 - dictIdx);
-+						const size_t safeLen = MIN(
++						const size_t safeLen = LZ4_MIN(
 +							prefixIdx - pos8,
 +							(size_t)(matchlimit -
 +								 ip));
@@ -8342,7 +8342,7 @@ index 000000000000..cccd7b7d0ab9
 +						const BYTE *const matchPtr =
 +							dictStart +
 +							(pos4 - dictIdx);
-+						const size_t safeLen = MIN(
++						const size_t safeLen = LZ4_MIN(
 +							prefixIdx - pos4,
 +							(size_t)(matchlimit -
 +								 ip));
@@ -8888,7 +8888,7 @@ index 000000000000..cccd7b7d0ab9
 +							/* Limit backLength not go further than lowestMatchIndex */
 +							backLength =
 +								matchCandidateIdx -
-+								MAX(matchCandidateIdx -
++								LZ4_MAX(matchCandidateIdx -
 +									    (U32)backLength,
 +								    lowestMatchIndex);
 +							assert(matchCandidateIdx -
@@ -8944,7 +8944,7 @@ index 000000000000..cccd7b7d0ab9
 +									if (lookBackLength ==
 +									    0) { /* no back possible */
 +										size_t const maxML =
-+											MIN(currentSegmentLength,
++											LZ4_MIN(currentSegmentLength,
 +											    srcPatternLength);
 +										if ((size_t)longest <
 +										    maxML) {
