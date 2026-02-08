@@ -74,6 +74,11 @@ on:
         required: true
         type: boolean
         default: 'true'
+      hymofs:
+        description: '是否开启Hymofs'
+        required: true
+        type: boolean
+        default: 'true'
       ccache_debug:
         description: '是否上传 Ccache调试日志(用于调试, 无需要不必开启)'
         required: true
@@ -387,7 +392,14 @@ jobs:
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
           fi
-          
+
+      - name: hymofs补丁
+        if: inputs.hymofs
+        run: |
+          echo "正在添加Hymofs"
+          cd kernel_workspace/common
+          curl -LSs https://raw.githubusercontent.com/Anatdx/HymoFS/main/setup.sh | bash -s defconfig arch/arm64/configs/gki_defconfig
+
       - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
         if: inputs.lz4_enable
         run: |
