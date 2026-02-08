@@ -193,6 +193,13 @@ jobs:
             echo "ccache缓存命中详情:"
             ccache -sv
           fi
+    
+      - name: hymofs补丁
+        if: inputs.hymofs
+        run: |
+          echo "正在添加Hymofs"
+          cd kernel_workspace/common
+          curl -LSs https://raw.githubusercontent.com/Anatdx/HymoFS/main/setup.sh | bash -s defconfig arch/arm64/configs/gki_defconfig
 
       - name: 添加KernelSU
         id: ksu_version
@@ -392,13 +399,6 @@ jobs:
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
           fi
-
-      - name: hymofs补丁
-        if: inputs.hymofs
-        run: |
-          echo "正在添加Hymofs"
-          cd kernel_workspace/common
-          curl -LSs https://raw.githubusercontent.com/Anatdx/HymoFS/main/setup.sh | bash -s defconfig arch/arm64/configs/gki_defconfig
 
       - name: 应用lz4 1.10.0 & zstd 1.5.7补丁
         if: inputs.lz4_enable
