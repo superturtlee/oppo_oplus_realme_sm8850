@@ -194,13 +194,6 @@ jobs:
             ccache -sv
           fi
     
-      - name: hymofs补丁
-        if: inputs.hymofs
-        run: |
-          echo "正在添加Hymofs"
-          cd kernel_workspace/common
-          curl -LSs https://raw.githubusercontent.com/Anatdx/HymoFS/main/setup.sh | bash -s defconfig arch/arm64/configs/gki_defconfig
-
       - name: 添加KernelSU
         id: ksu_version
         run: |
