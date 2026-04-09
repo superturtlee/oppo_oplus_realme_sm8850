@@ -584,8 +584,6 @@ jobs:
 
       - name: 添加KSU sig
         run: |
-      - name: 添加KSU sig
-        run: |
           cd kernel_workspace
           echo "替换KSU sig..."
     
@@ -601,6 +599,7 @@ jobs:
             KernelSU/kernel/manager/manager_sign.h
           fi
           cat KernelSU/kernel/manager/manager_sign.h
+          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> ./common/arch/arm64/configs/gki_defconfig
            
       - name: 构建内核
         run: |
