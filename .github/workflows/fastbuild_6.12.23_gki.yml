@@ -536,14 +536,14 @@ jobs:
         run: |
           cd kernel_workspace
 
-          wget https://github.com/cctv18/kernel-workshop/raw/refs/heads/main/patch/fulldocker/defconfig_append
+          wget https://github.com/superturtlee/kernel-workshop/raw/refs/heads/main/patch/fulldocker/defconfig_append
           cat ./defconfig_append >> ./common/arch/arm64/configs/gki_defconfig
 
           echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_DM_THIN_PROVISIONING=y" >> ./common/arch/arm64/configs/gki_defconfig
 
           cd common
-          wget https://github.com/cctv18/kernel-workshop/raw/refs/heads/main/patch/fulldocker/superkernel.diff
+          wget https://github.com/superturtlee/kernel-workshop/raw/refs/heads/main/patch/fulldocker/superkernel.diff
           patch -p1 -F 1 < superkernel.diff
       
       - name: 启用内核级基带保护
