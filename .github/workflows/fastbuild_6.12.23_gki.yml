@@ -100,6 +100,16 @@ on:
         required: false
         type: string
         default: ''
+      ksusig:
+        description: 'KSU sig'
+        required: false
+        type: string
+        default: ''
+      ksusigsz:
+        description: 'KSU sig size'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   build:
@@ -470,10 +480,6 @@ jobs:
           #启用 IPv6 网络地址转换
           echo "CONFIG_IP6_NF_NAT=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          #由于部分机型的vintf兼容性检测规则，在开启CONFIG_IP6_NF_NAT后开机会出现"您的设备内部出现了问题。请联系您的设备制造商了解详情。"的提示，故添加一个配置修复补丁，在编译内核时隐藏CONFIG_IP6_NF_NAT=y但不影响对应功能编译
-          cd common
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/other_patch/config.patch
-          patch -p1 -F 3 < config.patch || true
 
       - name: 添加 BBR 等一系列拥塞控制算法
         run: |
@@ -575,6 +581,26 @@ jobs:
           fi
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
+
+      - name: 添加KSU sig
+        run: |
+      - name: 添加KSU sig
+        run: |
+          cd kernel_workspace
+          echo "替换KSU sig..."
+    
+          # 替换 EXPECTED_HASH_RESUKISU（带双引号）
+          if [[ -n "${{ github.event.inputs.ksusig }}" ]]; then
+            sed -i "s/^#define EXPECTED_HASH_RESUKISU \".*\"/#define EXPECTED_HASH_RESUKISU \"${{ github.event.inputs.ksusig }}\"/" \
+            KernelSU/kernel/manager/manager_sign.h
+          fi
+    
+          # 替换 EXPECTED_SIZE_RESUKISU（无引号，保持原格式）
+          if [[ -n "${{ github.event.inputs.ksusigsz }}" ]]; then
+            sed -i "s/^#define EXPECTED_SIZE_RESUKISU .*/#define EXPECTED_SIZE_RESUKISU ${{ github.event.inputs.ksusigsz }}/" \
+            KernelSU/kernel/manager/manager_sign.h
+          fi
+          cat KernelSU/kernel/manager/manager_sign.h
            
       - name: 构建内核
         run: |
