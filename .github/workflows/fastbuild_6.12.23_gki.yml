@@ -80,6 +80,11 @@ on:
         required: true
         type: boolean
         default: 'false'
+      hymofs:
+        description: '是否开启hymofs内核功能支持'
+        required: true
+        type: boolean
+        default: 'false'
       ccache_update:
         description: '更新ccache缓存(将本次编译生成的ccache缓存覆盖至仓库缓存，在更改编译配置、源码或需要刷新缓存时开启)'
         required: true
@@ -550,6 +555,18 @@ jobs:
           cd common
           wget https://github.com/superturtlee/kernel-workshop-docker/raw/refs/heads/crazy/patch/fulldocker/superkernel.diff
           patch -p1 -F 1 < superkernel.diff
+
+      - name: 开启hymofs内核功能支持
+        if: inputs.hymofs
+        run: |
+          cd kernel_workspace
+
+          echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_DM_THIN_PROVISIONING=y" >> ./common/arch/arm64/configs/gki_defconfig
+
+          cd common
+          wget https://raw.githubusercontent.com/Anatdx/HymoFS/refs/heads/android16_6.12/patch/hymofs.patch
+          patch -p1 -F 1 < hymofs.patch
       
       - name: 启用内核级基带保护
         if: inputs.baseband_guard
