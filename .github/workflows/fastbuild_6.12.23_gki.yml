@@ -283,8 +283,8 @@ jobs:
             # 存储版本号到 GitHub 环境变量
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-            cp KernelSU/kernel/include/*.h common/include/
-            cp KernelSU/kernel/include/uapi/*.h common/include/uapi/
+            cp kernel/include/*.h ../common/include/
+            cp kernel/include/uapi/*.h ../common/include/uapi/
           elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
             echo "正在配置ReSukiSU..."
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
