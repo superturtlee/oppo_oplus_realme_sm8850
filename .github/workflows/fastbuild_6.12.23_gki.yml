@@ -616,6 +616,9 @@ jobs:
           fi
           cat KernelSU/kernel/manager/manager_sign.h
           echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_EXPECTED_SIZE=${{ github.event.inputs.ksusigsz }}" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_EXPECTED_HASH=${{ github.event.inputs.ksusig }}" >> ./common/arch/arm64/configs/gki_defconfig
+          tail ./common/arch/arm64/configs/gki_defconfig
            
       - name: 构建内核
         run: |
