@@ -605,16 +605,14 @@ jobs:
     
           # 替换 EXPECTED_HASH_RESUKISU（带双引号）
           if [[ -n "${{ github.event.inputs.ksusig }}" ]]; then
-            sed -i "s/^#define EXPECTED_HASH_RESUKISU \".*\"/#define EXPECTED_HASH_RESUKISU \"${{ github.event.inputs.ksusig }}\"/" \
-            KernelSU/kernel/manager/manager_sign.h
+            sed -i "s/^#define EXPECTED_HASH_RESUKISU \".*\"/#define EXPECTED_HASH_RESUKISU \"${{ github.event.inputs.ksusig }}\"/" KernelSU/kernel/manager/manager_sign.h || true
           fi
     
           # 替换 EXPECTED_SIZE_RESUKISU（无引号，保持原格式）
           if [[ -n "${{ github.event.inputs.ksusigsz }}" ]]; then
-            sed -i "s/^#define EXPECTED_SIZE_RESUKISU .*/#define EXPECTED_SIZE_RESUKISU ${{ github.event.inputs.ksusigsz }}/" \
-            KernelSU/kernel/manager/manager_sign.h
+            sed -i "s/^#define EXPECTED_SIZE_RESUKISU .*/#define EXPECTED_SIZE_RESUKISU ${{ github.event.inputs.ksusigsz }}/" KernelSU/kernel/manager/manager_sign.h || true
           fi
-          cat KernelSU/kernel/manager/manager_sign.h
+          cat KernelSU/kernel/manager/manager_sign.h || true
           echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_EXPECTED_SIZE=${{ github.event.inputs.ksusigsz }}" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_EXPECTED_HASH=${{ github.event.inputs.ksusig }}" >> ./common/arch/arm64/configs/gki_defconfig
