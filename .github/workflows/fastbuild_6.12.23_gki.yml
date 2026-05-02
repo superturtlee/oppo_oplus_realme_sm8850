@@ -267,7 +267,7 @@ jobs:
           cd kernel_workspace
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
             echo "正在配置SukiSU Ultra..."
-            curl -LSs "https://raw.githubusercontent.com/superturtlee/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s builtin
+            curl -LSs "https://raw.githubusercontent.com/superturtlee/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s main
             cd ./KernelSU
             # 获取当前 Git 提交的短哈希 (8位)
             GIT_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
@@ -283,6 +283,10 @@ jobs:
             # 存储版本号到 GitHub 环境变量
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
+            cd ../
+            cp ./KernelSU/kernel/include/*.h common/include/
+            cp ./KernelSU/kernel/include/uapi/*.h common/include/uapi/
+            
           elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
             echo "正在配置ReSukiSU..."
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
