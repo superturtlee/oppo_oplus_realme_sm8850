@@ -80,11 +80,6 @@ on:
         required: true
         type: boolean
         default: 'true'
-      hymofs:
-        description: '是否开启hymofs内核功能支持'
-        required: true
-        type: boolean
-        default: 'false'
       ccache_update:
         description: '更新ccache缓存(将本次编译生成的ccache缓存覆盖至仓库缓存，在更改编译配置、源码或需要刷新缓存时开启)'
         required: true
@@ -109,12 +104,12 @@ on:
         description: 'KSU sig'
         required: false
         type: string
-        default: ''
+        default: 'cde18e644dd79a09bf8aafb08e95450a1edee16635911a8fcdeb9420448db430'
       ksusigsz:
         description: 'KSU sig size'
         required: false
         type: string
-        default: ''
+        default: '1012'
 
 jobs:
   build:
@@ -267,26 +262,60 @@ jobs:
           cd kernel_workspace
           if [[ ${{ github.event.inputs.ksu_type }} == "sukisu" ]]; then
             echo "正在配置SukiSU Ultra..."
-            curl -LSs "https://raw.githubusercontent.com/superturtlee/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s main
+            curl -LSs "https://raw.githubusercontent.com/ShirkNeko/SukiSU-Ultra/refs/heads/main/kernel/setup.sh" | bash -s builtin
             cd ./KernelSU
             # 获取当前 Git 提交的短哈希 (8位)
             GIT_COMMIT_HASH=$(git rev-parse --short=8 HEAD)
             echo "当前提交哈希: $GIT_COMMIT_HASH"
             export KSU_VERSION=$KSU_VERSION
-            KSU_API_VERSION="4.1.2"
+            # 尝试最多 3 次获取 KernelSU API 版本号
+            for i in {1..3}; do
+              # 从远程 Makefile 中提取 KSU_API_VERSION
+              KSU_API_VERSION=$(curl -s "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/builtin/kernel/Makefile" | 
+                # 查找第一个包含版本定义的行
+                grep -m1 "KSU_VERSION_API :=" | 
+                # 提取等号后的值
+                awk -F'= ' '{print $2}' | 
+                # 删除所有空白字符
+                tr -d '[:space:]')
+              # 如果成功获取到版本号则跳出循环，否则等待 1 秒后重试
+              [ -n "$KSU_API_VERSION" ] && break || sleep 1
+            done
+            # 如果获取失败，使用默认版本号 3.1.7
+            [ -z "$KSU_API_VERSION" ] && KSU_API_VERSION="3.1.7"
             # 将 API 版本号存储到 GitHub 环境变量
             echo "KSU_API_VERSION=$KSU_API_VERSION" >> $GITHUB_ENV
             # 创建版本定义模板&版本格式函数: 使用获取的提交哈希和固定后缀
             # KSU_VERSION_API: API 版本定义
             # KSU_VERSION_FULL: 完整版本定义
+            VERSION_DEFINITIONS=$'define get_ksu_version_full\nv\\$1-'"$GIT_COMMIT_HASH"$'@cctv18\nendef\n\nKSU_VERSION_API := '"$KSU_API_VERSION"$'\nKSU_VERSION_FULL := v'"$KSU_API_VERSION"$'-'"$GIT_COMMIT_HASH"$'@cctv18'
+            # 清理内核 Makefile 中的旧版本定义
+            # 删除版本函数
+            sed -i '/define get_ksu_version_full/,/endef/d' kernel/Makefile
+            # 删除 API 版本定义
+            sed -i '/KSU_VERSION_API :=/d' kernel/Makefile
+            # 删除完整版本定义
+            sed -i '/KSU_VERSION_FULL :=/d' kernel/Makefile
+            # 在 REPO_OWNER 行后插入新版本定义
+            awk -v def="$VERSION_DEFINITIONS" '
+              # 当找到 REPO_OWNER 行时，插入版本定义并设置标记
+              /REPO_OWNER :=/ {print; print def; inserted=1; next}
+              # 打印所有行
+              1
+              # 如果未找到插入点，在文件末尾追加
+              END {if (!inserted) print def}
+            ' kernel/Makefile > kernel/Makefile.tmp && mv kernel/Makefile.tmp kernel/Makefile
+
+            # 生成自定义版本号（基于提交计数）, 失败时使用 114514
             KSU_VERSION=$(expr $(git rev-list --count main) + 37185 2>/dev/null || echo 114514)
             # 存储版本号到 GitHub 环境变量
             echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
             echo "ksuver=$KSU_VERSION" >> $GITHUB_OUTPUT
-            cd ../
-            cp ./KernelSU/kernel/include/*.h common/include/
-            cp ./KernelSU/kernel/include/uapi/*.h common/include/uapi/
-            
+
+            # 验证修改结果
+            grep -A10 "REPO_OWNER" kernel/Makefile  # 检查插入点后的内容
+            grep "KSU_VERSION_FULL" kernel/Makefile # 确认版本定义存在
+            echo "SukiSU版本号: v${KSU_API_VERSION}-${GIT_COMMIT_HASH}@cctv18"
           elif [[ ${{ github.event.inputs.ksu_type }} == "resukisu" ]]; then
             echo "正在配置ReSukiSU..."
             curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/refs/heads/main/kernel/setup.sh" | bash -s main
@@ -329,16 +358,13 @@ jobs:
           cd kernel_workspace
           if [[ ${{ github.event.inputs.ksu_type }} != "none" ]]; then
             echo "正在添加susfs补丁..."
-            git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu -b gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
+            git clone --depth=1 https://github.com/cctv18/susfs4oki.git susfs4ksu -b oki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}
             cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch ./common/
             cp ./susfs4ksu/kernel_patches/fs/* ./common/fs/
             cp ./susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-            cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
             cd ./common
             patch -p1 < 50_add_susfs_in_gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }}.patch || true
             cd ..
-            cd ./KernelSU
-            patch -p1 < 10_enable_susfs_for_ksu.patch || true
           else
             echo "已选择无内置KernelSU模式，跳过susfs配置..."
           fi
@@ -524,18 +550,6 @@ jobs:
           cd common
           wget https://github.com/superturtlee/kernel-workshop-docker/raw/refs/heads/crazy/patch/fulldocker/superkernel.diff
           patch -p1 -F 1 < superkernel.diff
-
-      - name: 开启hymofs内核功能支持
-        if: inputs.hymofs
-        run: |
-          cd kernel_workspace
-
-          echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_DM_THIN_PROVISIONING=y" >> ./common/arch/arm64/configs/gki_defconfig
-
-          cd common
-          wget https://raw.githubusercontent.com/Anatdx/HymoFS/refs/heads/android16_6.12/patch/hymofs.patch
-          patch -p1 -F 1 < hymofs.patch
       
       - name: 启用内核级基带保护
         if: inputs.baseband_guard
@@ -574,18 +588,17 @@ jobs:
     
           # 替换 EXPECTED_HASH_RESUKISU（带双引号）
           if [[ -n "${{ github.event.inputs.ksusig }}" ]]; then
-            sed -i "s/^#define EXPECTED_HASH_RESUKISU \".*\"/#define EXPECTED_HASH_RESUKISU \"${{ github.event.inputs.ksusig }}\"/" KernelSU/kernel/manager/manager_sign.h || true
+            sed -i "s/^#define EXPECTED_HASH_RESUKISU \".*\"/#define EXPECTED_HASH_RESUKISU \"${{ github.event.inputs.ksusig }}\"/" \
+            KernelSU/kernel/manager/manager_sign.h
           fi
     
           # 替换 EXPECTED_SIZE_RESUKISU（无引号，保持原格式）
           if [[ -n "${{ github.event.inputs.ksusigsz }}" ]]; then
-            sed -i "s/^#define EXPECTED_SIZE_RESUKISU .*/#define EXPECTED_SIZE_RESUKISU ${{ github.event.inputs.ksusigsz }}/" KernelSU/kernel/manager/manager_sign.h || true
+            sed -i "s/^#define EXPECTED_SIZE_RESUKISU .*/#define EXPECTED_SIZE_RESUKISU ${{ github.event.inputs.ksusigsz }}/" \
+            KernelSU/kernel/manager/manager_sign.h
           fi
-          cat KernelSU/kernel/manager/manager_sign.h || true
+          cat KernelSU/kernel/manager/manager_sign.h
           echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_EXPECTED_SIZE=${{ github.event.inputs.ksusigsz }}" >> ./common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_EXPECTED_HASH=${{ github.event.inputs.ksusig }}" >> ./common/arch/arm64/configs/gki_defconfig
-          tail ./common/arch/arm64/configs/gki_defconfig
            
       - name: 构建内核
         run: |
