@@ -614,6 +614,12 @@ jobs:
           fi
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
+          # kexec support
+          echo "CONFIG_KEXEC=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KEXEC_FILE=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KEXEC_JUMP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRASH_DUMP=y" >> ./common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRASH_HOTPLUG=y" >> ./common/arch/arm64/configs/gki_defconfig
            
       - name: 构建内核
         run: |
