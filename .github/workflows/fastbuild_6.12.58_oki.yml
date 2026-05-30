@@ -147,7 +147,7 @@ jobs:
           echo "正在克隆源码仓库..."
           aria2c -s16 -x16 -k1M https://github.com/superturtlee/oneplus_pad3_pro_krnl/archive/refs/heads/main.zip -o common.zip && 
           unzip -q common.zip && 
-          mv "main" common &&
+          mv "oneplus_pad3_pro_krnl" common &&
           rm -rf common.zip &
           
           echo "正在克隆llvm-clang19工具链..." &&
