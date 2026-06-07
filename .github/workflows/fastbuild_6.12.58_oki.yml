@@ -739,7 +739,7 @@ jobs:
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
           export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image modules
 
           # 编译后时间劫持二次校验
           echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
@@ -893,7 +893,12 @@ jobs:
           echo "=== 阶段3: 补充编译产物 ==="
           cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
           [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
-          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+          if [ -f "$BUILDDIR/Module.symvers" ]; then
+            install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers"
+          elif [ -f "$BUILDDIR/vmlinux.symvers" ]; then
+            install -m644 "$BUILDDIR/vmlinux.symvers" "$HDRDIR/Module.symvers"
+            echo "注意: 使用 vmlinux.symvers 作为 Module.symvers (仅包含 vmlinux 导出符号)"
+          fi
 
           echo "=== 阶段4: 合并源码树文件 (对应 Ubuntu link-headers) ==="
           (
@@ -974,7 +979,12 @@ jobs:
           echo "=== 阶段3: 补充编译产物 ==="
           cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
           [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
-          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+          if [ -f "$BUILDDIR/Module.symvers" ]; then
+            install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers"
+          elif [ -f "$BUILDDIR/vmlinux.symvers" ]; then
+            install -m644 "$BUILDDIR/vmlinux.symvers" "$HDRDIR/Module.symvers"
+            echo "注意: 使用 vmlinux.symvers 作为 Module.symvers"
+          fi
 
           echo "=== 阶段4: 合并源码树文件 ==="
           (
