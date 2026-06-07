@@ -851,7 +851,7 @@ jobs:
           cp "$BUILDDIR/.config" "$HDRDIR/.config"
           chmod 644 "$HDRDIR/.config"
           make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="clang" LD="ld.lld" HOSTCC="clang --target=aarch64-linux-gnu" HOSTCXX="clang++ --target=aarch64-linux-gnu" HOSTLD=ld.lld \
+            CC="clang" LD="ld.lld" HOSTCC=aarch64-linux-gnu-gcc HOSTCXX=aarch64-linux-gnu-g++ HOSTLD=aarch64-linux-gnu-ld \
             O="$HDRDIR" -j1 syncconfig prepare scripts
 
           echo "=== 阶段2: 替换 Makefile, 清理符号链接 ==="
