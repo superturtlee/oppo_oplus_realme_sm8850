@@ -142,7 +142,7 @@ jobs:
           sudo apt update &&
           sudo dpkg --add-architecture arm64 &&
           sudo sed -i 's/^Types: deb/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources &&
-          echo -e "Types: deb\nURIs: http://ports.ubuntu.com/ubuntu-ports\nSuites: $(lsb_release -cs) $(lsb_release -cs)-updates $(lsb_release -cs)-security\nComponents: main universe\nArchitectures: arm64" | sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null &&
+          CODENAME=$(lsb_release -cs) && echo -e "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-security main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null &&
           sudo apt-get update &&
           sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user-static binfmt-support libdw-dev:arm64 libelf-dev:arm64 zlib1g-dev:arm64 libssl-dev:arm64 &
           #旧版完整指令：（由于经过验证大部分指令已内置于GitHub Action环境中，故进行精简）
