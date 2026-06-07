@@ -462,32 +462,10 @@ jobs:
           echo "CONFIG_RUST=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_ANDROID_BINDER_IPC_RUST=m" >> ./common/arch/arm64/configs/gki_defconfig
           # 导出 rust_binder 模块所需的 IPC namespace 符号 (put_ipc_ns / init_ipc_ns)
-          cd ./common
-          patch -p1 -N <<'EOF'
-diff --git a/ipc/msgutil.c b/ipc/msgutil.c
---- a/ipc/msgutil.c
-+++ b/ipc/msgutil.c
-@@ -33,6 +33,7 @@ struct ipc_namespace init_ipc_ns = {
- 	.ns.ops = &ipcns_operations,
- #endif
- };
-+EXPORT_SYMBOL_GPL(init_ipc_ns);
-
- struct msg_msgseg {
- 	struct msg_msgseg *next;
-diff --git a/ipc/namespace.c b/ipc/namespace.c
---- a/ipc/namespace.c
-+++ b/ipc/namespace.c
-@@ -207,6 +207,7 @@ void put_ipc_ns(struct ipc_namespace *ns)
- 			schedule_work(&free_ipc_work);
- 	}
- }
-+EXPORT_SYMBOL_GPL(put_ipc_ns);
-
- static inline struct ipc_namespace *to_ipc_ns(struct ns_common *ns)
- {
-EOF
-          cd ..
+          sed -i '/^struct ipc_namespace init_ipc_ns = {/,/^};/{/^};/a\EXPORT_SYMBOL_GPL(init_ipc_ns);
+          }' ./common/ipc/msgutil.c
+          sed -i '/^void put_ipc_ns(struct ipc_namespace \*ns)/,/^}/{/^}/a\EXPORT_SYMBOL_GPL(put_ipc_ns);
+          }' ./common/ipc/namespace.c
 
       - name: 启用网络功能增强优化配置
         if: inputs.better_net
