@@ -135,7 +135,7 @@ jobs:
           sudo apt purge man-db &&
           sudo rm -rf /var/lib/man-db/auto-update &&
           sudo apt update &&
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev libc6-dev-arm64-cross &
+          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev gcc-aarch64-linux-gnu &
           #旧版完整指令：（由于经过验证大部分指令已内置于GitHub Action环境中，故进行精简）
           #sudo apt-get install -y --no-install-recommends curl bison flex make binutils git perl gcc python3 python-is-python3 bc libssl-dev libelf-dev libdw-dev zip unzip ccache
           
@@ -851,7 +851,7 @@ jobs:
           cp "$BUILDDIR/.config" "$HDRDIR/.config"
           chmod 644 "$HDRDIR/.config"
           make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="clang" LD="ld.lld" HOSTCC="clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu" HOSTCXX="clang++ --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu" HOSTLD=ld.lld \
+            CC="clang" LD="ld.lld" HOSTCC="clang --target=aarch64-linux-gnu" HOSTCXX="clang++ --target=aarch64-linux-gnu" HOSTLD=ld.lld \
             O="$HDRDIR" -j1 syncconfig prepare scripts
 
           echo "=== 阶段2: 替换 Makefile, 清理符号链接 ==="
