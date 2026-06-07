@@ -767,6 +767,7 @@ jobs:
           fi
           
       - name: 克隆 AnyKernel3 并打包
+        if: ${{ !inputs.skip_kernel_build }}
         id: create_zip
         run: |
           cd kernel_workspace
@@ -931,6 +932,7 @@ jobs:
           archive: false
 
       - name: 上传 ZIP 工件
+        if: ${{ !inputs.skip_kernel_build }}
         uses: actions/upload-artifact@v7
         with:
           path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
@@ -943,7 +945,7 @@ jobs:
           archive: false
 
   release:
-    if: inputs.release
+    if: ${{ inputs.release && !inputs.skip_kernel_build }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
