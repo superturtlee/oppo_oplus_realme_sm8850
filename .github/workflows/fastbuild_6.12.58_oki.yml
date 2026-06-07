@@ -825,19 +825,6 @@ jobs:
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
           zip -z ../$AK3_NAME < ./ak3.log
 
-      - name: 上传 Ccache 调试日志
-        if: always() && inputs.ccache_debug
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ github.workspace }}/kernel_workspace/debug.zip
-          archive: false
-
-      - name: 上传 ZIP 工件
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
-          archive: false
-
       - name: 打包 Linux Headers
         id: package_headers
         run: |
@@ -851,13 +838,40 @@ jobs:
           HDRDIR="${{ github.workspace }}/kernel_workspace/linux-headers"
           mkdir -p "$HDRDIR"
 
-          echo "=== 阶段1: 复制源码树头文件和构建基础设施 ==="
+          # ============================================================
+          # 参考 Ubuntu debian/rules.d/2-binary-arch.mk 打包流程:
+          #   1. cp .config → make O=$(hdrdir) -j1 syncconfig prepare scripts
+          #   2. rm Makefile → cp source Makefile → rm source include2
+          #   3. cp compile.h / module.lds / Module.symvers
+          #   4. link-headers (合并源码树文件)
+          #   5. find -name *.o -or -name *.cmd -exec rm
+          # ============================================================
+
+          echo "=== 阶段1: make O=\$HDRDIR -j1 syncconfig prepare scripts ==="
+          cp "$BUILDDIR/.config" "$HDRDIR/.config"
+          chmod 644 "$HDRDIR/.config"
+          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="clang" LD="ld.lld" HOSTCC=clang HOSTLD=ld.lld \
+            O="$HDRDIR" -j1 syncconfig prepare scripts
+
+          echo "=== 阶段2: 替换 Makefile, 清理符号链接 ==="
+          rm -f "$HDRDIR/Makefile"
+          cp "$SRCDIR/Makefile" "$HDRDIR/Makefile"
+          rm -rf "$HDRDIR/source" "$HDRDIR/include2"
+
+          echo "=== 阶段3: 补充编译产物 ==="
+          cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
+          [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
+          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+
+          echo "=== 阶段4: 合并源码树文件 (对应 Ubuntu link-headers) ==="
           (
             cd "$SRCDIR"
             find . \( -path ./.git -prune -o -path ./out -prune \) -prune -o \
               -type f \( -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \
               -o -name '*.sh' -o -name '*.pl' -o -name '*.lds' \) -print | \
             while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
               mkdir -p "$HDRDIR/$(dirname "$f")"
               cp "$f" "$HDRDIR/$f"
             done
@@ -866,6 +880,7 @@ jobs:
             cd "$SRCDIR"
             find ./include ./scripts -type f -print | \
             while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
               mkdir -p "$HDRDIR/$(dirname "$f")"
               cp "$f" "$HDRDIR/$f"
             done
@@ -874,45 +889,21 @@ jobs:
             cd "$SRCDIR"
             find ./arch/arm64 -type f \( -name '*.h' -o -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \) -print | \
             while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
               mkdir -p "$HDRDIR/$(dirname "$f")"
               cp "$f" "$HDRDIR/$f"
             done
           )
 
-          echo "=== 阶段2: make O=\$HDRDIR syncconfig prepare scripts ==="
-          cp "$BUILDDIR/.config" "$HDRDIR/.config"
-          chmod 644 "$HDRDIR/.config"
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="clang" LD="ld.lld" HOSTCC=clang HOSTLD=ld.lld \
-            O="$HDRDIR" syncconfig prepare scripts
-          rm -rf "$HDRDIR/source" "$HDRDIR/include2"
-          rm -f "$HDRDIR/Makefile"
-          cp "$SRCDIR/Makefile" "$HDRDIR/Makefile"
+          echo "=== 阶段5: 清理编译中间产物 ==="
+          find "$HDRDIR" \( -name '*.o' -o -name '*.cmd' \) -exec rm -f {} \;
 
-          echo "=== 阶段3: 补充编译产物 ==="
-          cp "$BUILDDIR/Module.symvers" "$HDRDIR/" 2>/dev/null || true
-          cp "$BUILDDIR/vmlinux.symvers" "$HDRDIR/" 2>/dev/null || true
-          [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
-          [ -f "$BUILDDIR/include/generated/compile.h" ] && cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/"
-          if [ -f "$BUILDDIR/tools/objtool/objtool" ]; then
-            mkdir -p "$HDRDIR/tools/objtool"
-            cp "$BUILDDIR/tools/objtool/objtool" "$HDRDIR/tools/objtool/"
-          fi
-          if [ -f "$BUILDDIR/arch/arm64/kernel/asm-offsets.s" ]; then
-            mkdir -p "$HDRDIR/arch/arm64/kernel"
-            cp "$BUILDDIR/arch/arm64/kernel/asm-offsets.s" "$HDRDIR/arch/arm64/kernel/"
-          fi
-
-          echo "=== 阶段4: 清理编译中间产物 ==="
-          find "$HDRDIR" \( -name '*.o' -o -name '*.cmd' -o -name '*.d' \) -exec rm -f {} \;
-
-          echo "=== 阶段5: 安装 UAPI headers ==="
-          cd "$SRCDIR"
+          echo "=== 阶段6: 安装 UAPI headers ==="
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
             CC="clang" LD="ld.lld" O=out \
             INSTALL_HDR_PATH="$HDRDIR/usr" headers_install
 
-          echo "=== 阶段6: 打包 ==="
+          echo "=== 阶段7: 打包 ==="
           cd "$HDRDIR"
           if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
             HEADERS_NAME="linux-headers-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}.tar.gz"
@@ -923,6 +914,19 @@ jobs:
           echo "headersname=$HEADERS_NAME" >> $GITHUB_OUTPUT
           echo "Linux Headers 打包完成: $HEADERS_NAME"
           ls -lh "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME"
+
+      - name: 上传 Ccache 调试日志
+        if: always() && inputs.ccache_debug
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/debug.zip
+          archive: false
+
+      - name: 上传 ZIP 工件
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
+          archive: false
 
       - name: 上传 Linux Headers 工件
         uses: actions/upload-artifact@v7
