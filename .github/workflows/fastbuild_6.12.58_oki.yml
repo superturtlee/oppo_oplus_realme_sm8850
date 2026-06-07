@@ -110,6 +110,11 @@ on:
         required: false
         type: string
         default: '1012'
+      skip_kernel_build:
+        description: '跳过内核构建(仅调试headers打包等后续步骤时使用)'
+        required: false
+        type: boolean
+        default: 'false'
 
 jobs:
   build:
@@ -117,6 +122,8 @@ jobs:
     outputs:
       ksuver: ${{ steps.ksu_version.outputs.ksuver }}
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
+      headersname: ${{ steps.package_headers.outputs.headersname }}
+      headersname_x86: ${{ steps.package_headers_x86.outputs.headersname_x86 }}
     permissions:
       actions: write
       contents: read
@@ -134,7 +141,11 @@ jobs:
           sudo apt purge man-db &&
           sudo rm -rf /var/lib/man-db/auto-update &&
           sudo apt update &&
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev &
+          sudo dpkg --add-architecture arm64 &&
+          sudo sed -i 's/^Types: deb/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources &&
+          CODENAME=$(lsb_release -cs) && echo -e "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-security main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null &&
+          sudo apt-get update &&
+          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user-static binfmt-support libdw-dev:arm64 libelf-dev:arm64 zlib1g-dev:arm64 libssl-dev:arm64 &
           #旧版完整指令：（由于经过验证大部分指令已内置于GitHub Action环境中，故进行精简）
           #sudo apt-get install -y --no-install-recommends curl bison flex make binutils git perl gcc python3 python-is-python3 bc libssl-dev libelf-dev libdw-dev zip unzip ccache
           
@@ -445,8 +456,8 @@ jobs:
           echo "CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE=y" >> ./common/arch/arm64/configs/gki_defconfig
           # 禁用 defconfig 检查
           sed -i 's/check_defconfig//' ./common/build.config.gki
-          #跳过将uapi标准头安装到 usr/include 目录的不必要操作，节省编译时间
-          echo "CONFIG_HEADERS_INSTALL=n" >> ./common/arch/arm64/configs/gki_defconfig
+          #启用 HEADERS_INSTALL 以便生成 linux headers 包（用于编译外部内核模块）
+          echo "CONFIG_HEADERS_INSTALL=y" >> ./common/arch/arm64/configs/gki_defconfig
           # 6.12内核Rust配置
           echo "CONFIG_RUST=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_ANDROID_BINDER_IPC_RUST=m" >> ./common/arch/arm64/configs/gki_defconfig
@@ -601,7 +612,26 @@ jobs:
           cat KernelSU/kernel/manager/manager_sign.h
           echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> ./common/arch/arm64/configs/gki_defconfig
            
+      - name: 生成内核配置
+        run: |
+          WORKDIR="$(pwd)"
+          export PATH="$WORKDIR/kernel_workspace/clang19/bin:$PATH"
+          export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+          export PATH="$WORKDIR/kernel_workspace/rust/bin:$PATH"
+          export RUSTC="rustc"
+          export BINDGEN="bindgen"
+          export CC="clang"
+          export LIBCLANG_PATH="$WORKDIR/kernel_workspace/clang19/lib"
+          export LLVM=1 LLVM_IAS=1
+          export ARCH=arm64 SUBARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          cd kernel_workspace/common
+          source "./_setup_env.sh" 2>/dev/null || true
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="clang" LD="ld.lld" OBJCOPY="llvm-objcopy" O=out gki_defconfig
+          echo "内核配置生成完成！"
+
       - name: 构建内核
+        if: ${{ !inputs.skip_kernel_build }}
         run: |
           WORKDIR="$(pwd)"
           export PATH="/usr/lib/ccache:$PATH"
@@ -619,7 +649,7 @@ jobs:
           echo "Rustc版本: $RUSTC_VERSION"
           echo "Bindgen版本: $BINDGEN_VERSION"
           pahole_version=$(pahole --version 2>/dev/null | head -n1); [ -z "$pahole_version" ] && echo "pahole版本：未安装" || echo "pahole版本：$pahole_version"
-          
+
           export CCACHE_LOGFILE="${{ github.workspace }}/kernel_workspace/ccache.log"
           export CCACHE_COMPILERCHECK="none"
           export CCACHE_BASEDIR="${{ github.workspace }}"
@@ -628,7 +658,7 @@ jobs:
           export CCACHE_DIR="${{ env.CCACHE_DIR }}"
           export CCACHE_MAXSIZE="3G"
           echo "sloppiness = file_stat_matches,include_file_ctime,include_file_mtime,pch_defines,file_macro,time_macros" >> "$CCACHE_DIR/ccache.conf"
-          
+
           cd kernel_workspace/common
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfakestat.so
           wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/libfaketimeMT.so
@@ -652,7 +682,7 @@ jobs:
           echo 'export FAKESTAT="'$FAKESTAT'"' >> ld-wrapper
           echo 'export FAKETIME="'$FAKETIME'"' >> ld-wrapper
           echo 'ld.lld "$@"' >> ld-wrapper
-          
+
           # 测试时间劫持测试是否正常工作
           echo "--- [Wrapper Test] 正在创建通用的时间劫持测试脚本 ---"
           echo '#!/bin/bash' > test-wrapper.sh
@@ -671,7 +701,7 @@ jobs:
           echo "--- 编译前环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
           echo "--- 编译前环境文件时间戳: ---"
           LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
-          
+
           # 6.12内核make编译核心配置：
           # 1. 重映射物理路径 (由于6.12内核引入了Rust代码，计算内核符号版本的工具变成了gendwarfksyms，而gendwarfksyms无法正确预处理绝对路径，故我们需要手动把绝对路径重映射为相对路径，否则内核符号校验值会大面积出错)
           COMMON_REAL_PATH=$(pwd -P)
@@ -702,16 +732,15 @@ jobs:
           export OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size STRIP=llvm-strip
           # 5. 编译前运行官方环境配置脚本
           source "./_setup_env.sh" 2>/dev/null || true
-          
+
           #在构建内核的同时清除不必要的.NET, Android NDK, Haskell, CodeQL运行库，清理空间且不阻塞后续步骤运行
           sudo rm -rf /usr/share/dotnet &
           sudo rm -rf /usr/local/lib/android &
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="clang" LD="ld.lld" OBJCOPY="llvm-objcopy" O=out gki_defconfig &&
           export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
           make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image
-          
+
           # 编译后时间劫持二次校验
           echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
           echo "--- 编译后环境文件时间戳: ---"
@@ -730,13 +759,14 @@ jobs:
           df -h
 
       - name: 保存新的 ccache 缓存
-        if: inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true'
+        if: ${{ !inputs.skip_kernel_build && (inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true') }}
         uses: actions/cache/save@v5
         with:
           path: ${{ env.CCACHE_DIR }}
           key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}
          
       - name: 应用KPM并修补内核
+        if: ${{ !inputs.skip_kernel_build }}
         run: |
           if [[ ${{ github.event.inputs.kpm_enable }} == 'builtin' && ( "${{ github.event.inputs.ksu_type }}" == "sukisu" || "${{ github.event.inputs.ksu_type }}" == "resukisu" ) ]]; then
             echo "正在应用KPM并修补内核..."
@@ -759,6 +789,7 @@ jobs:
           fi
           
       - name: 克隆 AnyKernel3 并打包
+        if: ${{ !inputs.skip_kernel_build }}
         id: create_zip
         run: |
           cd kernel_workspace
@@ -824,6 +855,178 @@ jobs:
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
           zip -z ../$AK3_NAME < ./ak3.log
 
+      - name: 打包 Linux Headers (ARM64原生)
+        id: package_headers
+        run: |
+          cd kernel_workspace/common
+          WORKDIR="$(cd ../.. && pwd)"
+          export PATH="$WORKDIR/kernel_workspace/clang19/bin:$PATH"
+          export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+
+          SRCDIR="$(pwd)"
+          BUILDDIR="$(pwd)/out"
+          HDRDIR="${{ github.workspace }}/kernel_workspace/linux-headers"
+          mkdir -p "$HDRDIR"
+
+          # ============================================================
+          # 参考 Ubuntu debian/rules.d/2-binary-arch.mk 打包流程:
+          #   1. cp .config → make O=$(hdrdir) -j1 syncconfig prepare scripts
+          #   2. rm Makefile → cp source Makefile → rm source include2
+          #   3. cp compile.h / module.lds / Module.symvers
+          #   4. link-headers (合并源码树文件)
+          #   5. find -name *.o -or -name *.cmd -exec rm
+          # ============================================================
+
+          echo "=== 阶段1: make O=\$HDRDIR -j1 syncconfig prepare scripts ==="
+          cp "$BUILDDIR/.config" "$HDRDIR/.config"
+          chmod 644 "$HDRDIR/.config"
+          export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
+          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="clang" LD="ld.lld" HOSTCC=aarch64-linux-gnu-gcc HOSTCXX=aarch64-linux-gnu-g++ HOSTLD=aarch64-linux-gnu-ld \
+            O="$HDRDIR" -j1 syncconfig prepare scripts
+
+          echo "=== 阶段2: 替换 Makefile, 清理符号链接 ==="
+          rm -f "$HDRDIR/Makefile"
+          cp "$SRCDIR/Makefile" "$HDRDIR/Makefile"
+          rm -rf "$HDRDIR/source" "$HDRDIR/include2"
+
+          echo "=== 阶段3: 补充编译产物 ==="
+          cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
+          [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
+          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+
+          echo "=== 阶段4: 合并源码树文件 (对应 Ubuntu link-headers) ==="
+          (
+            cd "$SRCDIR"
+            find . \( -path ./.git -prune -o -path ./out -prune \) -prune -o \
+              -type f \( -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \
+              -o -name '*.sh' -o -name '*.pl' -o -name '*.lds' \) -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+          (
+            cd "$SRCDIR"
+            find ./include ./scripts -type f -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+          (
+            cd "$SRCDIR"
+            find ./arch/arm64 -type f \( -name '*.h' -o -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \) -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+
+          echo "=== 阶段5: 清理编译中间产物 ==="
+          find "$HDRDIR" \( -name '*.o' -o -name '*.cmd' \) -exec rm -f {} \;
+
+          echo "=== 阶段6: 安装 UAPI headers ==="
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="clang" LD="ld.lld" O=out \
+            INSTALL_HDR_PATH="$HDRDIR/usr" headers_install
+
+          echo "=== 阶段7: 打包 ==="
+          cd "$HDRDIR"
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            HEADERS_NAME="linux-headers-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}.tar.gz"
+          else
+            HEADERS_NAME="linux-headers-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}.tar.gz"
+          fi
+          tar -czf "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME" .
+          echo "headersname=$HEADERS_NAME" >> $GITHUB_OUTPUT
+          echo "Linux Headers 打包完成: $HEADERS_NAME"
+          ls -lh "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME"
+
+      - name: 打包 Linux Headers (x86交叉编译用)
+        id: package_headers_x86
+        run: |
+          cd kernel_workspace/common
+          WORKDIR="$(cd ../.. && pwd)"
+          export PATH="$WORKDIR/kernel_workspace/clang19/bin:$PATH"
+          export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+
+          SRCDIR="$(pwd)"
+          BUILDDIR="$(pwd)/out"
+          HDRDIR="${{ github.workspace }}/kernel_workspace/linux-headers-x86"
+          mkdir -p "$HDRDIR"
+
+          echo "=== 阶段1: make O=\$HDRDIR -j1 syncconfig prepare scripts (x86 host) ==="
+          cp "$BUILDDIR/.config" "$HDRDIR/.config"
+          chmod 644 "$HDRDIR/.config"
+          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="clang" LD="ld.lld" \
+            O="$HDRDIR" -j1 syncconfig prepare scripts
+
+          echo "=== 阶段2: 替换 Makefile, 清理符号链接 ==="
+          rm -f "$HDRDIR/Makefile"
+          cp "$SRCDIR/Makefile" "$HDRDIR/Makefile"
+          rm -rf "$HDRDIR/source" "$HDRDIR/include2"
+
+          echo "=== 阶段3: 补充编译产物 ==="
+          cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
+          [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
+          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+
+          echo "=== 阶段4: 合并源码树文件 ==="
+          (
+            cd "$SRCDIR"
+            find . \( -path ./.git -prune -o -path ./out -prune \) -prune -o \
+              -type f \( -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \
+              -o -name '*.sh' -o -name '*.pl' -o -name '*.lds' \) -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+          (
+            cd "$SRCDIR"
+            find ./include ./scripts -type f -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+          (
+            cd "$SRCDIR"
+            find ./arch/arm64 -type f \( -name '*.h' -o -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \) -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+
+          echo "=== 阶段5: 清理编译中间产物 ==="
+          find "$HDRDIR" \( -name '*.o' -o -name '*.cmd' \) -exec rm -f {} \;
+
+          echo "=== 阶段6: 安装 UAPI headers ==="
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="clang" LD="ld.lld" O=out \
+            INSTALL_HDR_PATH="$HDRDIR/usr" headers_install
+
+          echo "=== 阶段7: 打包 ==="
+          cd "$HDRDIR"
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            HEADERS_NAME="linux-headers-x86-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}.tar.gz"
+          else
+            HEADERS_NAME="linux-headers-x86-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}.tar.gz"
+          fi
+          tar -czf "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME" .
+          echo "headersname_x86=$HEADERS_NAME" >> $GITHUB_OUTPUT
+          echo "Linux Headers (x86) 打包完成: $HEADERS_NAME"
+          ls -lh "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME"
+
       - name: 上传 Ccache 调试日志
         if: always() && inputs.ccache_debug
         uses: actions/upload-artifact@v7
@@ -832,13 +1035,26 @@ jobs:
           archive: false
 
       - name: 上传 ZIP 工件
+        if: ${{ !inputs.skip_kernel_build }}
         uses: actions/upload-artifact@v7
         with:
           path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
           archive: false
 
+      - name: 上传 Linux Headers 工件 (ARM64)
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/${{ steps.package_headers.outputs.headersname }}
+          archive: false
+
+      - name: 上传 Linux Headers 工件 (x86)
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/${{ steps.package_headers_x86.outputs.headersname_x86 }}
+          archive: false
+
   release:
-    if: inputs.release
+    if: ${{ inputs.release && !inputs.skip_kernel_build }}
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -851,6 +1067,20 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.ak3name }}
+          path: ./release_zips
+          skip-decompress: true
+
+      - name: 下载 Linux Headers 工件 (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.headersname }}
+          path: ./release_zips
+          skip-decompress: true
+
+      - name: 下载 Linux Headers 工件 (x86)
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.headersname_x86 }}
           path: ./release_zips
           skip-decompress: true
 
@@ -931,4 +1161,5 @@ jobs:
             --repo "${{ github.repository }}" \
             --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
             --notes-file release_notes.md \
-            release_zips/AnyKernel3_*.zip
+            release_zips/AnyKernel3_*.zip \
+            release_zips/linux-headers-*.tar.gz
