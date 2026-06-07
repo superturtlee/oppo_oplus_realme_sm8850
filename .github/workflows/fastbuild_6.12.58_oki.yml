@@ -123,6 +123,7 @@ jobs:
       ksuver: ${{ steps.ksu_version.outputs.ksuver }}
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
       headersname: ${{ steps.package_headers.outputs.headersname }}
+      headersname_x86: ${{ steps.package_headers_x86.outputs.headersname_x86 }}
     permissions:
       actions: write
       contents: read
@@ -854,7 +855,7 @@ jobs:
           echo "BBG: ${{ github.event.inputs.baseband_guard }}" >> ./ak3.log
           zip -z ../$AK3_NAME < ./ak3.log
 
-      - name: 打包 Linux Headers
+      - name: 打包 Linux Headers (ARM64原生)
         id: package_headers
         run: |
           cd kernel_workspace/common
@@ -945,6 +946,87 @@ jobs:
           echo "Linux Headers 打包完成: $HEADERS_NAME"
           ls -lh "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME"
 
+      - name: 打包 Linux Headers (x86交叉编译用)
+        id: package_headers_x86
+        run: |
+          cd kernel_workspace/common
+          WORKDIR="$(cd ../.. && pwd)"
+          export PATH="$WORKDIR/kernel_workspace/clang19/bin:$PATH"
+          export PATH="$WORKDIR/kernel_workspace/build-tools/bin:$PATH"
+
+          SRCDIR="$(pwd)"
+          BUILDDIR="$(pwd)/out"
+          HDRDIR="${{ github.workspace }}/kernel_workspace/linux-headers-x86"
+          mkdir -p "$HDRDIR"
+
+          echo "=== 阶段1: make O=\$HDRDIR -j1 syncconfig prepare scripts (x86 host) ==="
+          cp "$BUILDDIR/.config" "$HDRDIR/.config"
+          chmod 644 "$HDRDIR/.config"
+          make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="clang" LD="ld.lld" \
+            O="$HDRDIR" -j1 syncconfig prepare scripts
+
+          echo "=== 阶段2: 替换 Makefile, 清理符号链接 ==="
+          rm -f "$HDRDIR/Makefile"
+          cp "$SRCDIR/Makefile" "$HDRDIR/Makefile"
+          rm -rf "$HDRDIR/source" "$HDRDIR/include2"
+
+          echo "=== 阶段3: 补充编译产物 ==="
+          cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
+          [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
+          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+
+          echo "=== 阶段4: 合并源码树文件 ==="
+          (
+            cd "$SRCDIR"
+            find . \( -path ./.git -prune -o -path ./out -prune \) -prune -o \
+              -type f \( -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \
+              -o -name '*.sh' -o -name '*.pl' -o -name '*.lds' \) -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+          (
+            cd "$SRCDIR"
+            find ./include ./scripts -type f -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+          (
+            cd "$SRCDIR"
+            find ./arch/arm64 -type f \( -name '*.h' -o -name 'Makefile*' -o -name 'Kconfig*' -o -name 'Kbuild*' \) -print | \
+            while IFS= read -r f; do
+              [ -e "$HDRDIR/$f" ] && continue
+              mkdir -p "$HDRDIR/$(dirname "$f")"
+              cp "$f" "$HDRDIR/$f"
+            done
+          )
+
+          echo "=== 阶段5: 清理编译中间产物 ==="
+          find "$HDRDIR" \( -name '*.o' -o -name '*.cmd' \) -exec rm -f {} \;
+
+          echo "=== 阶段6: 安装 UAPI headers ==="
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            CC="clang" LD="ld.lld" O=out \
+            INSTALL_HDR_PATH="$HDRDIR/usr" headers_install
+
+          echo "=== 阶段7: 打包 ==="
+          cd "$HDRDIR"
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            HEADERS_NAME="linux-headers-x86-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}.tar.gz"
+          else
+            HEADERS_NAME="linux-headers-x86-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}.tar.gz"
+          fi
+          tar -czf "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME" .
+          echo "headersname_x86=$HEADERS_NAME" >> $GITHUB_OUTPUT
+          echo "Linux Headers (x86) 打包完成: $HEADERS_NAME"
+          ls -lh "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME"
+
       - name: 上传 Ccache 调试日志
         if: always() && inputs.ccache_debug
         uses: actions/upload-artifact@v7
@@ -982,10 +1064,17 @@ jobs:
           path: ./release_zips
           skip-decompress: true
 
-      - name: 下载 Linux Headers 工件
+      - name: 下载 Linux Headers 工件 (ARM64)
         uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.headersname }}
+          path: ./release_zips
+          skip-decompress: true
+
+      - name: 下载 Linux Headers 工件 (x86)
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.headersname_x86 }}
           path: ./release_zips
           skip-decompress: true
 
