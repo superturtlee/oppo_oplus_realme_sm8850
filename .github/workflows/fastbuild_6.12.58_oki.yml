@@ -1056,10 +1056,16 @@ jobs:
           path: ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip
           archive: false
 
-      - name: 上传 Linux Headers 工件
+      - name: 上传 Linux Headers 工件 (ARM64)
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ github.workspace }}/kernel_workspace/linux-headers-*.tar.gz
+          path: ${{ github.workspace }}/kernel_workspace/${{ steps.package_headers.outputs.headersname }}
+          archive: false
+
+      - name: 上传 Linux Headers 工件 (x86)
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/${{ steps.package_headers_x86.outputs.headersname_x86 }}
           archive: false
 
   release:
