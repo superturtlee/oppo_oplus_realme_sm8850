@@ -4,7 +4,7 @@ env:
   TZ: Asia/Shanghai
   ANDROID_VERSION: 'android16'
   KERNEL_VERSION: '6.12'
-  SUB_VERSION: '58_oki'
+  SUB_VERSION: '58'
   KERNEL_NAME: 'android16-6-g376529f3e739-ab15072794-4k'
   CCACHE_KEY: ccache-neov5-oki-6.12.58
 
@@ -124,6 +124,7 @@ jobs:
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
       headersname: ${{ steps.package_headers.outputs.headersname }}
       headersname_x86: ${{ steps.package_headers_x86.outputs.headersname_x86 }}
+      headersmodule: ${{ steps.magisk_headers.outputs.headersmodule }}
     permissions:
       actions: write
       contents: read
@@ -461,7 +462,12 @@ jobs:
           # 6.12内核Rust配置
           echo "CONFIG_RUST=y" >> ./common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_ANDROID_BINDER_IPC_RUST=m" >> ./common/arch/arm64/configs/gki_defconfig
-          
+          # 导出 rust_binder 模块所需的 IPC namespace 符号 (put_ipc_ns / init_ipc_ns)
+          sed -i '/^struct ipc_namespace init_ipc_ns = {/,/^};/{/^};/a\EXPORT_SYMBOL_GPL(init_ipc_ns);
+          }' ./common/ipc/msgutil.c
+          sed -i '/^void put_ipc_ns(struct ipc_namespace \*ns)/,/^}/{/^}/a\EXPORT_SYMBOL_GPL(put_ipc_ns);
+          }' ./common/ipc/namespace.c
+
       - name: 启用网络功能增强优化配置
         if: inputs.better_net
         run: |
@@ -739,7 +745,7 @@ jobs:
           sudo rm -rf /opt/ghc &
           sudo rm -rf /opt/hostedtoolcache/CodeQL &
           export CC="$(pwd)/cc-wrapper" && export LD="$(pwd)/ld-wrapper" &&
-          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image
+          make -j$(nproc --all) LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- CC="$(pwd)/cc-wrapper" LD="$(pwd)/ld-wrapper" OBJCOPY="llvm-objcopy" O=out Image modules
 
           # 编译后时间劫持二次校验
           echo "--- 编译后环境时间: $(LD_PRELOAD=$PRELOAD_LIBS date) ---"
@@ -893,7 +899,12 @@ jobs:
           echo "=== 阶段3: 补充编译产物 ==="
           cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
           [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
-          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+          if [ -f "$BUILDDIR/Module.symvers" ]; then
+            install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers"
+          elif [ -f "$BUILDDIR/vmlinux.symvers" ]; then
+            install -m644 "$BUILDDIR/vmlinux.symvers" "$HDRDIR/Module.symvers"
+            echo "注意: 使用 vmlinux.symvers 作为 Module.symvers (仅包含 vmlinux 导出符号)"
+          fi
 
           echo "=== 阶段4: 合并源码树文件 (对应 Ubuntu link-headers) ==="
           (
@@ -974,7 +985,12 @@ jobs:
           echo "=== 阶段3: 补充编译产物 ==="
           cp "$BUILDDIR/include/generated/compile.h" "$HDRDIR/include/generated/compile.h" 2>/dev/null || true
           [ -f "$BUILDDIR/scripts/module.lds" ] && cp "$BUILDDIR/scripts/module.lds" "$HDRDIR/scripts/"
-          install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers" 2>/dev/null || true
+          if [ -f "$BUILDDIR/Module.symvers" ]; then
+            install -m644 "$BUILDDIR/Module.symvers" "$HDRDIR/Module.symvers"
+          elif [ -f "$BUILDDIR/vmlinux.symvers" ]; then
+            install -m644 "$BUILDDIR/vmlinux.symvers" "$HDRDIR/Module.symvers"
+            echo "注意: 使用 vmlinux.symvers 作为 Module.symvers"
+          fi
 
           echo "=== 阶段4: 合并源码树文件 ==="
           (
@@ -1026,6 +1042,35 @@ jobs:
           echo "headersname_x86=$HEADERS_NAME" >> $GITHUB_OUTPUT
           echo "Linux Headers (x86) 打包完成: $HEADERS_NAME"
           ls -lh "${{ github.workspace }}/kernel_workspace/$HEADERS_NAME"
+
+      - name: 打包 DKMS Headers Magisk 模块
+        id: magisk_headers
+        run: |
+          cd kernel_workspace
+          git clone --depth=1 https://github.com/superturtlee/dkms_android.git
+          if [[ -n "${{ github.event.inputs.kernel_suffix }}" ]]; then
+            KVER="${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ github.event.inputs.kernel_suffix }}"
+          else
+            KVER="${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}-${{ env.KERNEL_NAME }}"
+          fi
+          HEADERS_TAR="${{ github.workspace }}/kernel_workspace/${{ steps.package_headers.outputs.headersname }}"
+          cd dkms_android
+          sed -i "s/^version=.*/version=${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}/" magisk_modules/dkms-headers/module.prop
+          sed -i "s/^versionCode=.*/versionCode=$(echo '${{ env.KERNEL_VERSION }}${{ env.SUB_VERSION }}' | tr -d '.')/" magisk_modules/dkms-headers/module.prop
+          sed -i "s/^description=.*/description=Linux kernel headers for DKMS module building ($KVER)/" magisk_modules/dkms-headers/module.prop
+          sh headerswrap.sh "$HEADERS_TAR" "$KVER"
+          MODZIP=$(ls output/dkms-headers-*.zip)
+          cp "$MODZIP" "${{ github.workspace }}/kernel_workspace/"
+          MODZIP_NAME=$(basename "$MODZIP")
+          echo "headersmodule=$MODZIP_NAME" >> $GITHUB_OUTPUT
+          echo "DKMS Headers Magisk 模块打包完成: $MODZIP_NAME"
+          ls -lh "${{ github.workspace }}/kernel_workspace/$MODZIP_NAME"
+
+      - name: 上传 DKMS Headers Magisk 模块
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ github.workspace }}/kernel_workspace/${{ steps.magisk_headers.outputs.headersmodule }}
+          archive: false
 
       - name: 上传 Ccache 调试日志
         if: always() && inputs.ccache_debug
@@ -1081,6 +1126,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.headersname_x86 }}
+          path: ./release_zips
+          skip-decompress: true
+
+      - name: 下载 DKMS Headers Magisk 模块
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.headersmodule }}
           path: ./release_zips
           skip-decompress: true
 
@@ -1162,4 +1214,5 @@ jobs:
             --title "${{ env.TAG_HEAD }}-${{ env.FULL_VERSION }}" \
             --notes-file release_notes.md \
             release_zips/AnyKernel3_*.zip \
-            release_zips/linux-headers-*.tar.gz
+            release_zips/linux-headers-*.tar.gz \
+            release_zips/dkms-headers-*.zip
