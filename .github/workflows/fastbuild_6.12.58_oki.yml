@@ -100,16 +100,6 @@ on:
         required: false
         type: string
         default: 'android16-6-g376529f3e739-ab15072794-4k'
-      ksusig:
-        description: 'KSU sig'
-        required: false
-        type: string
-        default: 'cde18e644dd79a09bf8aafb08e95450a1edee16635911a8fcdeb9420448db430'
-      ksusigsz:
-        description: 'KSU sig size'
-        required: false
-        type: string
-        default: '1012'
       skip_kernel_build:
         description: '跳过内核构建(仅调试headers打包等后续步骤时使用)'
         required: false
@@ -605,23 +595,8 @@ jobs:
           sed -i 's/${scm_version}//' ./common/scripts/setlocalversion
           echo "CONFIG_LOCALVERSION_AUTO=n" >> ./common/arch/arm64/configs/gki_defconfig
 
-      - name: 添加KSU sig
+      - name: Remove multimanager
         run: |
-          cd kernel_workspace
-          echo "替换KSU sig..."
-    
-          # 替换 EXPECTED_HASH_RESUKISU（带双引号）
-          if [[ -n "${{ github.event.inputs.ksusig }}" ]]; then
-            sed -i "s/^#define EXPECTED_HASH_RESUKISU \".*\"/#define EXPECTED_HASH_RESUKISU \"${{ github.event.inputs.ksusig }}\"/" \
-            KernelSU/kernel/manager/manager_sign.h
-          fi
-    
-          # 替换 EXPECTED_SIZE_RESUKISU（无引号，保持原格式）
-          if [[ -n "${{ github.event.inputs.ksusigsz }}" ]]; then
-            sed -i "s/^#define EXPECTED_SIZE_RESUKISU .*/#define EXPECTED_SIZE_RESUKISU ${{ github.event.inputs.ksusigsz }}/" \
-            KernelSU/kernel/manager/manager_sign.h
-          fi
-          cat KernelSU/kernel/manager/manager_sign.h
           echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> ./common/arch/arm64/configs/gki_defconfig
            
       - name: 生成内核配置
