@@ -598,7 +598,7 @@ jobs:
       - name: Remove multimanager
         run: |
           cd kernel_workspace
-          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> /common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_MULTI_MANAGER_SUPPORT=n" >> ./common/arch/arm64/configs/gki_defconfig
            
       - name: 生成内核配置
         run: |
