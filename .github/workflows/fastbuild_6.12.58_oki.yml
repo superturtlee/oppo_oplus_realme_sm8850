@@ -215,77 +215,36 @@ jobs:
           df -h
           echo "当前构建内核版本：${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}"
 
-      - name: 载入当前版本内核的 ccache缓存
-        uses: actions/cache@v5
-        id: ccache-restore
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}
-          restore-keys: |
-            ${{ env.CCACHE_KEY }}-${{ runner.os }}-
-            ${{ env.CCACHE_KEY }}-
-
-      - name: 拉取公共预置 ccache 缓存
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 初始化并配置ccache(本地持久目录,免上传下载)
         run: |
-          echo "检查本地缓存状态..."
+          # CCACHE_DIR 在 $HOME 下(runner volume 内,容器/job 间持久),
+          # 无需 actions/cache 上传下载,也不拉公共 ccache
           if [ -d "${{ env.CCACHE_DIR }}" ] && [ "$(ls -A ${{ env.CCACHE_DIR }} 2>/dev/null)" ]; then
-            echo "检测到本地已成功载入 ccache 缓存，跳过公共 ccache 拉取！"
-            exit 0
-          fi
-          
-          echo "未命中缓存，尝试拉取最新公共 ccache ..."
-          mkdir -p ${{ env.CCACHE_DIR }}
-          FILE_NAME="ccache-${{ env.KERNEL_VERSION }}.${{ env.SUB_VERSION }}.tar.zst"
-          
-          if gh release download -p "$FILE_NAME" -R cctv18/public_ccache; then
-            echo "成功下载 $FILE_NAME，正在解压..."
-            tar -I zstd -xf "$FILE_NAME" -C ${{ env.CCACHE_DIR }}
-            echo "公共 ccache 恢复完成！"
+            echo "本地 ccache 缓存命中: ${{ env.CCACHE_DIR }}"
+            LOCAL_HIT=true
           else
-            echo "公共 ccache 中未找到对应的 ccache 文件，将进行全量全新编译..."
+            echo "本地无 ccache 缓存,首次将全量编译"
+            LOCAL_HIT=false
           fi
+          echo "CACHE_HIT=$LOCAL_HIT" >> $GITHUB_ENV
 
-      - name: 清除旧 ccache 缓存
-        if: inputs.ccache_update
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "正在清除仓库中的旧 ccache 缓存..."
-          if gh cache delete ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }} -R ${{ github.repository }}; then
-            echo "成功删除旧的 ccache 缓存！"
-          else
-            echo "旧缓存不存在或已被清理！"
-          fi
-      
-      - name: 初始化并配置ccache
-        run: |
-          # 设置ccache环境变量
           export CCACHE_COMPILERCHECK="none"
           export CCACHE_BASEDIR="${{ github.workspace }}"
           export CCACHE_NOHASHDIR="true"
           export CCACHE_NOHARDLINK="true"
           export CCACHE_DIR="${{ env.CCACHE_DIR }}"
           export CCACHE_MAXSIZE="${{ env.CCACHE_MAXSIZE }}"
-          
-          # 确保ccache目录存在
+
           mkdir -p "$CCACHE_DIR"
-          
+
           # 每次运行都重新配置缓存大小
           echo "配置ccache缓存大小为: $CCACHE_MAXSIZE"
           ccache -M "$CCACHE_MAXSIZE"
           ccache -o compression=true
-          
-          # 显示初始缓存状态
+
           echo "ccache初始状态:"
           ccache -s
-          
-          # 如果缓存恢复命中，显示详细信息
-          if [ "${{ steps.ccache-restore.outputs.cache-hit }}" == 'true' ]; then
-            echo "ccache缓存命中详情:"
-            ccache -sv
-          fi
+          [ "$LOCAL_HIT" == "true" ] && ccache -sv
 
       - name: 添加KernelSU
         id: ksu_version
@@ -734,13 +693,16 @@ jobs:
           echo "编译后空间:"
           df -h
 
-      - name: 保存新的 ccache 缓存
-        if: ${{ !inputs.skip_kernel_build && (inputs.ccache_update || steps.ccache-restore.outputs.cache-hit != 'true') }}
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ env.CCACHE_DIR }}
-          key: ${{ env.CCACHE_KEY }}-${{ runner.os }}-${{ github.ref_name }}
-         
+      - name: ccache 收尾(本地持久化,无需上传)
+        if: ${{ !inputs.skip_kernel_build }}
+        run: |
+          echo "ccache状态："
+          ccache -s
+          echo "ccache 已随构建实时写入本地持久目录 ${{ env.CCACHE_DIR }},无需上传"
+          if [ "${{ inputs.ccache_update }}" == "true" ]; then
+            echo "ccache_update=true:清空本地缓存以强制下次全量重建"
+            ccache -C > /dev/null 2>&1 || rm -rf "${{ env.CCACHE_DIR }}"/*
+          fi
       - name: 应用KPM并修补内核
         if: ${{ !inputs.skip_kernel_build }}
         run: |
