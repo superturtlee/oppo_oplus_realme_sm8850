@@ -108,7 +108,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted]
     outputs:
       ksuver: ${{ steps.ksu_version.outputs.ksuver }}
       ak3name: ${{ steps.create_zip.outputs.ak3name }}
@@ -146,12 +146,22 @@ jobs:
           sudo chmod +x /usr/bin/ccache &&
           rm -f ./ccache &
           
-          echo "正在克隆源码仓库..."
-          aria2c -s16 -x16 -k1M https://github.com/superturtlee/oneplus_pad3_pro_krnl/archive/refs/heads/main.zip -o common.zip && 
-          unzip -q common.zip && 
-          ls &&
-          mv "oneplus_pad3_pro_krnl-main" common &&
-          rm -rf common.zip &
+          echo "同步内核源码仓库(本地缓存)..."
+          SRC_CACHE="$HOME/kernel-cache/oneplus_pad3_pro_krnl"
+          mkdir -p "$(dirname "$SRC_CACHE")" &&
+          if [ ! -d "$SRC_CACHE/.git" ]; then
+            echo "首次构建:完整克隆源码仓库..."
+            git clone https://github.com/superturtlee/oneplus_pad3_pro_krnl.git "$SRC_CACHE"
+          else
+            echo "本地缓存命中:增量拉取更新..."
+            git -C "$SRC_CACHE" remote update --prune
+            git -C "$SRC_CACHE" checkout -f main
+            git -C "$SRC_CACHE" reset --hard origin/main
+          fi
+          echo "复制代码快照到工作区..."
+          mkdir -p common &&
+          git -C "$SRC_CACHE" archive --format=tar HEAD | tar -xf - -C common &&
+          echo "源码快照完成:$(git -C "$SRC_CACHE" rev-parse --short HEAD)" &
           
           echo "正在克隆llvm-clang19工具链..." &&
           mkdir -p clang19 &&
