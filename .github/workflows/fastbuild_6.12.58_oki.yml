@@ -140,12 +140,17 @@ jobs:
           #旧版完整指令：（由于经过验证大部分指令已内置于GitHub Action环境中，故进行精简）
           #sudo apt-get install -y --no-install-recommends curl bison flex make binutils git perl gcc python3 python-is-python3 bc libssl-dev libelf-dev libdw-dev zip unzip ccache
           
-          #使用最新版ccache v4.12.2（Ubuntu软件仓库的版本并非最新）
-          wget https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/ccache-x86-64 -O ccache &&
-          sudo cp -f ./ccache /usr/bin/ccache &&
-          sudo chmod +x /usr/bin/ccache &&
-          rm -f ./ccache &
-          
+          #使用最新版ccache v4.12.2（Ubuntu软件仓库的版本并非最新）— 二进制走持久缓存
+          TC_CACHE="$HOME/toolchain-cache"
+          mkdir -p "$TC_CACHE" &&
+          if [ -x "$TC_CACHE/ccache-x86-64" ]; then
+            echo "ccache二进制缓存命中"
+          else
+            wget -q https://github.com/$GITHUB_REPOSITORY/raw/refs/heads/$GITHUB_REF_NAME/lib/ccache-x86-64 -O "$TC_CACHE/ccache-x86-64"
+          fi &&
+          sudo cp -f "$TC_CACHE/ccache-x86-64" /usr/bin/ccache &&
+          sudo chmod +x /usr/bin/ccache &
+
           echo "同步内核源码仓库(本地缓存)..."
           SRC_CACHE="$HOME/kernel-cache/oneplus_pad3_pro_krnl"
           mkdir -p "$(dirname "$SRC_CACHE")" &&
@@ -162,24 +167,38 @@ jobs:
           mkdir -p common &&
           git -C "$SRC_CACHE" archive --format=tar HEAD | tar -xf - -C common &&
           echo "源码快照完成:$(git -C "$SRC_CACHE" rev-parse --short HEAD)" &
-          
-          echo "正在克隆llvm-clang19工具链..." &&
-          mkdir -p clang19 &&
-          aria2c -s16 -x16 -k1M https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/clang-r536225.zip -o clang.zip &&
-          unzip -q clang.zip -d clang19 &&
-          rm -rf clang.zip &
-          
-          echo "正在克隆Rust 1.82.0工具链..." &&
-          mkdir -p rust &&
-          aria2c -s16 -x16 -k1M https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/rust.zip -o rust.zip &&
-          unzip -q rust.zip -d rust &&
-          rm -rf rust.zip &
-          
-          echo "正在克隆构建工具..." &&
-          aria2c -s16 -x16 -k1M https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/build-tools.zip -o build-tools.zip &&
-          unzip -q build-tools.zip &&
-          rm -rf build-tools.zip &
-          
+
+          # ---------- 三套工具链 zip 持久缓存($HOME/toolchain-cache,命中跳过下载) ----------
+          fetch_tc() {
+            local ZIP_NAME="$1" URL="$2" UNZIP_TARGET="$3"
+            if [ -f "$TC_CACHE/$ZIP_NAME" ]; then
+              echo "工具链缓存命中:$ZIP_NAME($(du -h "$TC_CACHE/$ZIP_NAME" | cut -f1)),跳过下载"
+            else
+              echo "工具链缓存未命中,下载 $ZIP_NAME ..."
+              if ! aria2c -s16 -x16 -k1M --allow-overwrite=true -d "$TC_CACHE" "$URL" -o "$ZIP_NAME"; then
+                echo "下载失败,清理残档以保证下次重试"
+                rm -f "$TC_CACHE/$ZIP_NAME"
+                return 1
+              fi
+            fi
+            unzip -q -o "$TC_CACHE/$ZIP_NAME" $UNZIP_TARGET
+          }
+
+          echo "正在准备llvm-clang19工具链..." &&
+          fetch_tc clang-r536225.zip \
+            https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/clang-r536225.zip \
+            "-d clang19" &
+
+          echo "正在准备Rust 1.82.0工具链..." &&
+          fetch_tc rust.zip \
+            https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/rust.zip \
+            "-d rust" &
+
+          echo "正在准备构建工具..." &&
+          fetch_tc build-tools.zip \
+            https://github.com/cctv18/oneplus_sm8650_toolchain/releases/download/LLVM-Clang19-r536225/build-tools.zip \
+            "" &
+
           wait
           echo "所有源码及llvm-clang19工具链初始化完成！"
           echo "正在去除 dirty 后缀..."
