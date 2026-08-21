@@ -136,7 +136,7 @@ jobs:
           sudo sed -i 's/^Types: deb/Types: deb\nArchitectures: amd64/' /etc/apt/sources.list.d/ubuntu.sources &&
           CODENAME=$(lsb_release -cs) && echo -e "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-updates main universe\ndeb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports $CODENAME-security main universe" | sudo tee /etc/apt/sources.list.d/arm64-ports.list > /dev/null &&
           sudo apt-get update &&
-          sudo apt-get install -y --no-install-recommends binutils python-is-python3 libssl-dev libelf-dev libdw-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user-static binfmt-support libdw-dev:arm64 libelf-dev:arm64 zlib1g-dev:arm64 libssl-dev:arm64 &
+          sudo apt-get install -y --no-install-recommends cpio bc bison flex rsync lz4 zstd xz-utils kmod binutils python-is-python3 zlib1g-dev libssl-dev libelf-dev libdw-dev gcc-aarch64-linux-gnu libc6-dev-arm64-cross qemu-user-static binfmt-support libdw-dev:arm64 libelf-dev:arm64 zlib1g-dev:arm64 libssl-dev:arm64 &
           #旧版完整指令：（由于经过验证大部分指令已内置于GitHub Action环境中，故进行精简）
           #sudo apt-get install -y --no-install-recommends curl bison flex make binutils git perl gcc python3 python-is-python3 bc libssl-dev libelf-dev libdw-dev zip unzip ccache
           
@@ -818,9 +818,11 @@ jobs:
           echo "=== 阶段1: make O=\$HDRDIR -j1 syncconfig prepare scripts ==="
           cp "$BUILDDIR/.config" "$HDRDIR/.config"
           chmod 644 "$HDRDIR/.config"
-          export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
+          # 主机工具(gendwarfksyms 等)必须用本机编译器链接 libdw/libelf/libz,
+          # 强制 HOSTCC=aarch64 会导致 cannot find -ldw/-lelf/-lz
+          ldconfig -p | grep -E 'libdw\.so|libelf\.so|libz\.so' || true
           make LLVM=1 ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
-            CC="clang" LD="ld.lld" HOSTCC=aarch64-linux-gnu-gcc HOSTCXX=aarch64-linux-gnu-g++ HOSTLD=aarch64-linux-gnu-ld \
+            CC="clang" LD="ld.lld" \
             O="$HDRDIR" -j1 syncconfig prepare scripts
 
           echo "=== 阶段2: 替换 Makefile, 清理符号链接 ==="
